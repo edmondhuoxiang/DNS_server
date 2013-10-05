@@ -216,15 +216,7 @@ int main(int argc, char ** argv){
 		if(question_domain[strlen(question_domain)-1] == '.')
 			question_domain[strlen(question_domain)-1] = '\0';
 
-
 		printf("Receive query for %s\n", question_domain);
-
-		//create sock to authoritative server
-		int sock_client = socket(AF_INET6, SOCK_DGRAM, 0);
-		if(sock_client<0){
-			perror("Creating socket failed: ");
-			exit(1);
-		}
 
 		if(name_server.ss_family == AF_INET)
 			((struct sockaddr_in*)&name_server)->sin_port = htons(53);
@@ -236,7 +228,7 @@ int main(int argc, char ** argv){
 		}
 
 		//Send query to authoritative server
-		int send_count = sendto(sock_client, dns_packet, packet_size, 0, (struct sockaddr*)&name_server, sizeof(struct sockaddr_in6));
+		int send_count = sendto(sockfd, dns_packet, packet_size, 0, (struct sockaddr*)&name_server, sizeof(struct sockaddr_in6));
 		if(send_count<0){
 			perror("Send failed");
 			exit(1);
@@ -245,12 +237,11 @@ int main(int argc, char ** argv){
 		//await the response
 		if(dns_packet) 
 			free(dns_packet);
-		if((dns_packet=receive(sock_client, SOCK_DGRAM, &packet_size, &server_address))==NULL){
+		if((dns_packet=receive(sockfd, SOCK_DGRAM, &packet_size, &server_address))==NULL){
 			perror("Receive Failed");
 			return EXIT_FAILURE;
 		}
 
-		close(sock_client);
 
 		//send the response to client
 		send_count = sendto(sockfd, dns_packet, packet_size, 0, (struct sockaddr*)&client_address, sizeof(struct sockaddr_in6));
