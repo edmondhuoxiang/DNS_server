@@ -1,116 +1,37 @@
-#include <stdint.h>
+#ifndef _DNS_H_
+#define _DNS_H_
 
+#include "hw5.h"
 
-#define IPV4_ADDR_LEN		0x0004
-#define DNS_REPLY_FLAGS		0x8180
-#define DNS_REPLY_REFUSED	0x8183
-#define DNS_REPLY_NAME		0xC00C
-#define DNS_REPLY_TTL		0x0005
-#define DNS_CLASS_IN		0x0001
-#define DNS_TYPE_A		0x0001
-#define DNS_TYPE_NS		0x0002
-#define DNS_NUM_ANSWERS		0x0002
-#define UDP_RECV_SIZE 512
-#define PERIOD_SIZE 1
-#define PERIOD "."
-/* DNS header structure. Most of the message is variable
-	 size, which means we can't declare them in this C struct */
-struct dns_hdr {
-	uint16_t id,flags,q_count,a_count,auth_count,other_count;	
-	// variable number of questions
-	// variable number of answer resource records
-	// variable number of authoritative server records
-	// variable number of other resource records
-} __attribute__((packed));
+// Main work function. Takes a DNS request and resolves it recursively starting with the root name servers.
+int resolve_name(int sock,					//UDP sock to communicate DNS
+				uint8_t * request,			//Request DNS query (from dig for example)
+				int packet_size,			//Size of request
+				uint8_t * response,			//store the response with answer section
+				struct sockaddr_storage * nameservers, //The current level of name servers to query
+				int nameserver_count);		//The numberof nameservers
 
+// returns: true if answer is found, otherwise not
+// side effect: While answer is found, populate result with ip address.
+int extract_answer(uint8_t * response, sss * result);
 
-struct dns_query_section {
-	uint16_t type;
-	uint16_t class;
-} __attribute__((packed));
+// Reads from server file and fill root_servers[]
+void read_server_file();
 
-struct dns_rr {
-	// first a variable sized name, then
-	uint16_t type;
-	uint16_t class;
-	uint32_t ttl;
-	uint16_t datalen;
-	// and then a variable sized data field
-} __attribute__((packed));
+// This function should be called while receiving a response from a NS and  then being used to 
+// advance the state of the sending query_node' dependent node. 
+// The response should be parsed for answers and passed up along  the dependancy path until the client 
+// request node is found where upon it should be sent to that client
+void advance_state(struct NODE * state, uint8_t * response, int packet_size);
 
-struct dns_answer_section
-{
-	uint16_t name;
-	uint16_t type;
-	uint16_t class;
-	uint16_t ttl_top;
-	uint16_t ttl;
-	uint16_t data_len;
-};
+//This function sends the next request to a random NS from 'state's nameserver list. It creates a new 
+//state if 'state' is a CLIENT type (creates a RECURSIVE state to satisfy the CLIENT). Or it sends the
+//next request in the recursion name resolving if the state is of type RECURSIVE of HELPER
+void send_next_request(struct NODE * dependent);
 
-struct client_state{
-	char * hostname;
-	struct sockaddr_in6 * addr;
-	char * dns_packet; 
-	int packet_size;
-	int sock;
-};
+//This function appends aa nameserver ip to the nameserver list of state. The use case is for when a HELPER
+//state receives a response (ns ip), it's dependent (a RECURSIVE state) must have the nameserver ip address
+//for it's nameserver list
+int append_ns_ip(struct NODE * state, uint8_t * response);
 
-/* converts between the normal www.cs.uic.edu format to
-	 the DNS-style 3www2cs3uic3edu format. Returns the
-   length of the string written to dns_name. */
-
-int to_dns_style(char* str_name, uint8_t* dns_name)
-{
-	int part_len=0;
-	int i;
-	for(i=0;i<strlen(str_name);i++) {
-		if(str_name[i]!='.') {
-			dns_name[i+1]=str_name[i];
-			part_len++;
-		}
-		else {
-			dns_name[i-part_len]=part_len;
-			part_len=0;
-		}
-	}
-	dns_name[strlen(str_name)-part_len]=part_len;
-	dns_name[strlen(str_name)+1]=0;
-	return strlen(str_name)+2;
-}
-
-/* converts between DNS-style format to normal host name format.
-	 Also supports DNS-style name compression: message should point to
-	 the first byte of the DNS message.
-	 
-	 Returns the number of bytes of dns_name read.
- */
-int from_dns_style(uint8_t *message, uint8_t* dns_name, char* str_name) {
-	uint8_t part_remainder=0;
-	int len=0;
-	int return_len=0;
-	uint8_t* orig_name = dns_name;
-	while(*dns_name) {
-		if(part_remainder==0) {
-			// this condition checks for message compression, see RFC 1035 4.1.4
-			if((*dns_name)>=0xc0) { 
-				if(return_len==0)
-					return_len = (dns_name-orig_name)+2;
-				dns_name=message+(((*dns_name)&0x3f)<<8)+*(dns_name+1);
-				continue;
-			}
-			else {
-				part_remainder=*dns_name;
-				if(len>0)
-					str_name[len++]='.';
-			}
-		}
-		else {
-			str_name[len++]=*dns_name;
-			part_remainder--;
-		}
-		dns_name++;
-	}
-	str_name[len]=0;
-	return (return_len?return_len:dns_name-orig_name+1);
-}
+#endif
